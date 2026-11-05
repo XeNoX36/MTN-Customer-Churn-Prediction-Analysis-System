@@ -4,6 +4,8 @@
 prevent customer churn for MTN Nigeria — with a calibrated model, a
 branded Streamlit dashboard, and one-click retraining.**
 
+lINK TO THE APP https://mtn-customer-churn-prediction-analysis-system.streamlit.app/
+
 ![Status](https://img.shields.io/badge/status-production--ready-success)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-1.4%2B-orange)
