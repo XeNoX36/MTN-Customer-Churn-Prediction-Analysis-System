@@ -13,7 +13,7 @@ lINK TO THE APP https://mtn-customer-churn-prediction-analysis-system.streamlit.
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
-
+![Alt text](https://github.com/XeNoX36/MTN-Customer-Churn-Prediction-Analysis-System/blob/main/MTN%20predictor.png)
 ## 📑 Table of contents
 
 1. [Executive summary](#1-executive-summary)
