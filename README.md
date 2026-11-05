@@ -1074,5 +1074,3 @@ This project stores only derived features and predictions; no PII is
 persisted unless you add logging.
 
 ---
-
-*README version 2.0 · Last updated: [insert date] · Maintainer: [insert name]*
