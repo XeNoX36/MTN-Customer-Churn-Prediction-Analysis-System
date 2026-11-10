@@ -552,6 +552,99 @@ threshold   = bundle["threshold"]
 importances = bundle["top_importances"]
 
 # ─────────────────────────────────────────────────────────────
+# Result card + what-if (drawn from the saved inputs on every rerun)
+# ─────────────────────────────────────────────────────────────
+def render_prediction(inp: dict, version: int) -> None:
+    X_new = row_from_inputs(inp)
+
+    try:
+        prob = float(pipeline.predict_proba(X_new)[0, 1])
+        pred = int(prob >= threshold)
+    except Exception as e:
+        # return (not st.stop) so the Batch and About tabs still render
+        st.error(f"Prediction failed: {e}")
+        return
+
+    badge, css, advice = risk_bucket(prob)
+
+    # ---- main result card ----
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.markdown(f"""
+        <div class="card card-primary">
+            <span class="risk-badge {css}">{badge}</span>
+            <div class="kpi-label" style="margin-top:14px;">Churn probability</div>
+            <div class="kpi">{prob*100:.1f}%</div>
+            <div style="color:#aaa; margin-top:6px;">
+                Decision threshold <b style="color:{MTN_YELLOW}">{threshold:.2f}</b>
+                &nbsp;·&nbsp;
+                Prediction
+                <b style="color:{MTN_YELLOW}">
+                {'WILL CHURN' if pred else 'LIKELY TO STAY'}</b>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.progress(prob)
+
+        st.markdown(f'<div class="rec"><b>Recommended action:</b> {advice}</div>',
+                    unsafe_allow_html=True)
+
+    with c2:
+        st.markdown("#### Why this prediction?")
+        for feat, score in list(importances.items())[:6]:
+            clean = (feat.replace("num__", "").replace("cat__", "")
+                         .replace("bin__", "").replace("_", " "))
+            bar = "█" * max(1, int(score * 40))
+            st.markdown(
+                f"**{clean}**  \n"
+                f"<span style='color:{MTN_YELLOW}; font-family: monospace;'>"
+                f"{bar}</span> &nbsp;<span style='color:#999'>{score:.3f}</span>",
+                unsafe_allow_html=True,
+            )
+
+    # ---- what-if ----
+    st.divider()
+    st.markdown("### 🎛️ What-if: how sensitive is this customer?")
+    st.caption("Drag a lever below to see how churn probability moves "
+               "**without** changing the form above.")
+
+    auc = bundle.get("metrics", {}).get("roc_auc", 1.0)
+    if auc < 0.6:
+        st.caption(f"⚠️ This model's ROC-AUC is {auc:.2f} (0.5 = guessing), so "
+                   "what-if changes mostly reflect noise, not real customer behaviour.")
+
+    # Slider limits are widened to include the submitted value; before, a tenure
+    # above 120 (the form allows 130) crashed the slider.
+    ten_max = max(120, int(inp["tenure"]))
+    rev_max = max(2_000_000, int(inp["revenue"]))
+
+    # `version` is in each key so a NEW prediction resets the sliders to the new
+    # customer's values (a fixed key would keep the previous customer's what-if).
+    wcol1, wcol2, wcol3 = st.columns(3)
+    new_sat = wcol1.slider("Satisfaction (what-if)", 1, 5,
+                           int(inp["satisfaction"]), key=f"w_sat_{version}")
+    new_ten = wcol2.slider("Tenure in months (what-if)", 0, ten_max,
+                           int(inp["tenure"]), key=f"w_ten_{version}")
+    new_rev = wcol3.slider("Total Revenue ₦ (what-if)", 0, rev_max,
+                           int(inp["revenue"]), step=10_000, key=f"w_rev_{version}")
+
+    inp2 = {**inp, "satisfaction": new_sat, "tenure": new_ten, "revenue": new_rev}
+    X_what = row_from_inputs(inp2)
+    try:
+        prob_what = float(pipeline.predict_proba(X_what)[0, 1])
+    except Exception:
+        prob_what = prob
+
+    delta = prob_what - prob
+    st.metric(
+        "New churn probability",
+        f"{prob_what*100:.1f}%",
+        delta=f"{delta*100:+.1f} pp vs current",
+        delta_color="inverse",
+    )
+
+
+# ─────────────────────────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────────────────────────
 tab_predict, tab_batch, tab_about = st.tabs(
@@ -610,84 +703,25 @@ with tab_predict:
         submitted = st.form_submit_button("🔮 Predict churn risk",
                                            use_container_width=True)
 
+    # IMPORTANT: Streamlit re-runs this whole script whenever ANY widget changes
+    # (e.g. a what-if slider), and `submitted` is True only on the single run
+    # right after the button click. So we save the submitted inputs in
+    # session_state and draw the results from there. Otherwise, moving a
+    # what-if slider made `submitted` False and the results + sliders vanished.
     if submitted:
-        inp = dict(
+        st.session_state["last_inp"] = dict(
             age=age, gender=gender, state=state, satisfaction=satisfaction,
             device=device, plan=plan, tenure=tenure,
             times_purchased=times_purchased, unit_price=unit_price,
             revenue=revenue, data_usage=data_usage,
         )
-        X_new = row_from_inputs(inp)
+        # New prediction -> new version number -> what-if sliders start fresh
+        st.session_state["inp_version"] = st.session_state.get("inp_version", 0) + 1
 
-        try:
-            prob = float(pipeline.predict_proba(X_new)[0, 1])
-            pred = int(prob >= threshold)
-        except Exception as e:
-            st.error(f"Prediction failed: {e}")
-            st.stop()
+    if "last_inp" in st.session_state:
+        render_prediction(st.session_state["last_inp"],
+                          st.session_state["inp_version"])
 
-        badge, css, advice = risk_bucket(prob)
-
-        # ---- main result card ----
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown(f"""
-            <div class="card card-primary">
-                <span class="risk-badge {css}">{badge}</span>
-                <div class="kpi-label" style="margin-top:14px;">Churn probability</div>
-                <div class="kpi">{prob*100:.1f}%</div>
-                <div style="color:#aaa; margin-top:6px;">
-                    Decision threshold <b style="color:{MTN_YELLOW}">{threshold:.2f}</b>
-                    &nbsp;·&nbsp;
-                    Prediction
-                    <b style="color:{MTN_YELLOW}">
-                    {'WILL CHURN' if pred else 'LIKELY TO STAY'}</b>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.progress(prob)
-
-            st.markdown(f'<div class="rec"><b>Recommended action:</b> {advice}</div>',
-                        unsafe_allow_html=True)
-
-        with c2:
-            st.markdown("#### Why this prediction?")
-            for feat, score in list(importances.items())[:6]:
-                clean = (feat.replace("num__", "").replace("cat__", "")
-                             .replace("bin__", "").replace("_", " "))
-                bar = "█" * max(1, int(score * 40))
-                st.markdown(
-                    f"**{clean}**  \n"
-                    f"<span style='color:{MTN_YELLOW}; font-family: monospace;'>"
-                    f"{bar}</span> &nbsp;<span style='color:#999'>{score:.3f}</span>",
-                    unsafe_allow_html=True,
-                )
-
-        # ---- what-if slider ----
-        st.divider()
-        st.markdown("### 🎛️ What-if: how sensitive is this customer?")
-        st.caption("Drag a lever below to see how churn probability moves "
-                   "**without** changing the form above.")
-        wcol1, wcol2, wcol3 = st.columns(3)
-        new_sat  = wcol1.slider("Satisfaction (what-if)", 1, 5, satisfaction, key="w_sat")
-        new_ten  = wcol2.slider("Tenure in months (what-if)", 0, 120, tenure, key="w_ten")
-        new_rev  = wcol3.slider("Total Revenue ₦ (what-if)", 0, 2_000_000,
-                                int(min(revenue, 2_000_000)), step=10_000, key="w_rev")
-
-        inp2 = {**inp, "satisfaction": new_sat, "tenure": new_ten, "revenue": new_rev}
-        X_what = row_from_inputs(inp2)
-        try:
-            prob_what = float(pipeline.predict_proba(X_what)[0, 1])
-        except Exception:
-            prob_what = prob
-
-        delta = prob_what - prob
-        st.metric(
-            "New churn probability",
-            f"{prob_what*100:.1f}%",
-            delta=f"{delta*100:+.1f} pp vs current",
-            delta_color="inverse",
-        )
 
 # ═════════════════════════════════════════════════════════════
 # TAB 2 — batch scoring
