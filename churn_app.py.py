@@ -187,7 +187,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # Paths / constants
 # ─────────────────────────────────────────────────────────────
 BUNDLE_PATH  = Path("churn_model_bundle.pkl")
-DATA_PATH    = Path(r"c:\Users\HomePC\Documents\Repository\MTN\new_mtn.csv")
+DATA_PATH    = Path("new_mtn.csv")
 RANDOM_STATE = 42
 np.random.seed(RANDOM_STATE)
 
